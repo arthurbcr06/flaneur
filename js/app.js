@@ -609,15 +609,15 @@
   }
   function candToPlace(c) {
     const oh = P.parseOpeningHours(c.tags && c.tags.opening_hours);
-    return { id: uid(), name: c.name, lat: c.lat, lng: c.lng, dur: c.dur, open: oh ? oh.open : '00:00', close: oh ? oh.close : '23:59', closed: oh ? oh.closed : [], hoursUnknown: !oh, cats: c.cats, meal: c.meal, why: c.label + (c.fame >= 20 ? ' · très connu' : ''), must: false, day: 0, osm: c.osm, src: 'disc' };
+    return { id: uid(), name: c.name, lat: c.lat, lng: c.lng, dur: c.dur, open: oh ? oh.open : '00:00', close: oh ? oh.close : '23:59', closed: oh ? oh.closed : [], hoursUnknown: !oh, cats: c.cats, meal: c.meal, why: (c.desc ? cap1(c.desc) : c.label) + (c.fame >= 20 ? ' · très connu' : ''), must: false, day: 0, osm: c.osm, src: 'disc' };
   }
   $('#btn-discover').addEventListener('click', async () => {
     const st = $('#disc-status'), btn = $('#btn-discover');
     btn.disabled = true; st.className = 'status'; st.innerHTML = '<span class="spin"></span>Je cherche les meilleurs endroits autour…';
     try {
-      const radius = { walk: 2500, mix: 4500, transit: 6000, bike: 6000, car: 15000 }[S.transport] || 4000;
-      discCands = await SV.discover(discCenter(), radius);
-      if (!discCands.length) throw new Error('vide');
+      const radius = { walk: 3000, mix: 6000, transit: 8000, bike: 8000, car: 10000 }[S.transport] || 6000;
+      discCands = await SV.discover(discCenter(), radius, S.city);
+      if (!discCands.length) { st.className = 'status err'; st.textContent = "Je n'ai pas trouvé de lieux connus autour de ton hôtel. Vérifie qu'il est bien placé dans Planifier."; btn.disabled = false; renderDisc(); return; }
       rankCands();
       const per = (P.PACE[S.pace] || P.PACE.normal).perDay;
       const keep = S.places.filter(p => p.must);
@@ -634,7 +634,7 @@
       st.textContent = chosen.length + ' lieux choisis. Tu peux en ajouter ou en retirer ci-dessous.';
       setTimeout(() => setTab('prog'), 400);
     } catch (e) {
-      st.className = 'status err'; st.textContent = 'Recherche impossible pour le moment (connexion ou serveur occupé). Réessaie dans une minute.';
+      st.className = 'status err'; st.textContent = 'Recherche impossible : Wikipédia ne répond pas (' + (e && e.message ? e.message : 'erreur réseau') + '). Vérifie ta connexion et réessaie.';
     }
     btn.disabled = false; renderDisc();
   });

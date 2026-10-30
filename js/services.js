@@ -100,13 +100,15 @@
     return city ? { name: city.name, lat: city.lat, lng: city.lng } : null;
   };
 
-  /* --- Overpass --- */
-  const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+  /* --- Overpass (petites requêtes seulement : le service limite chaque utilisateur depuis 2026) --- */
+  const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
   SV.overpass = async function (query) {
     let err;
     for (const url of OVERPASS) {
-      try { return await getJSON(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(query) }); }
+      const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+      try { return await getJSON(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(query), signal: ctl.signal }); }
       catch (e) { err = e; }
+      finally { clearTimeout(t); }
     }
     throw err;
   };
@@ -120,38 +122,70 @@
     return el ? el.tags || {} : null;
   };
 
-  const MAINKEYS = ['tourism', 'historic', 'amenity', 'leisure', 'place', 'building', 'man_made', 'shop', 'natural', 'highway'];
-  function mainTag(tags) { for (const k of MAINKEYS) if (tags[k]) return [k, tags[k]]; return ['', '']; }
+  /* --- Lieux à découvrir : les articles Wikipédia géolocalisés autour d'un point ---
+     Rapide, sans quota, et ne garde que des lieux assez notables pour avoir un article. */
+  const RULES = [
+    // [motif, catégories, durée, libellé]
+    [/\b(musée|museum|muséum|galerie d'art|art gallery|kunsthalle)\b/i, ['musees'], 90, 'Musée'],
+    [/\b(château|castle|palais|palace|forteresse|fortress|citadelle|citadel|logis royal)\b/i, ['histoire', 'incontournable'], 75, 'Château'],
+    [/\b(cathédrale|cathedral|basilique|basilica)\b/i, ['histoire', 'incontournable'], 45, 'Cathédrale'],
+    [/\b(abbaye|abbey|monastère|monastery|prieuré|priory|collégiale)\b/i, ['histoire'], 45, 'Abbaye'],
+    [/\b(église|church|chapelle|chapel|temple|synagogue|mosquée|mosque)\b/i, ['histoire'], 30, 'Édifice religieux'],
+    [/\b(thermes|bains|thermal|bath|spa|hammam)\b/i, ['bains'], 150, 'Bains'],
+    [/\b(jardin|garden|parc|park|arboretum|square|bois|forêt|forest|zoo|lac|lake|île|island|promenade)\b/i, ['parcs'], 45, 'Parc / jardin'],
+    [/\b(belvédère|panorama|point de vue|viewpoint|colline|hill|mont|mount|tour d'observation|observation tower)\b/i, ['vues'], 30, 'Point de vue'],
+    [/\b(monument|mémorial|memorial|statue|fontaine|fountain|arc de triomphe|obélisque|porte|gate|rempart|ruines|ruins|vestige|tour|tower|beffroi|hôtel particulier|maison|house|logis|manoir|hôtel de ville|town hall|mairie|cimetière|cemetery|site archéologique)\b/i, ['histoire'], 25, 'Monument'],
+    [/\b(pont|bridge)\b/i, ['vues'], 15, 'Pont'],
+    [/\b(marché|market|halles?)\b/i, ['food', 'shopping'], 45, 'Marché'],
+    [/\b(théâtre|theatre|theater|opéra|opera|salle de concert|concert hall)\b/i, ['incontournable'], 40, 'Théâtre / opéra'],
+    [/\b(place|plaza|piazza|quartier historique|vieille ville|old town|rue piétonne)\b/i, ['quartiers'], 20, 'Place / quartier'],
+    [/\b(bar|pub|brasserie|guinguette|cabaret|discothèque|nightclub|ruin bar)\b/i, ['nuit'], 60, 'Bar'],
+    [/\b(café|restaurant|bistrot|crêperie)\b/i, ['food'], 50, 'Restaurant'],
+    [/\b(passage couvert|galeries? marchande|centre commercial|shopping)\b/i, ['shopping'], 30, 'Shopping'],
+    [/\b(aquarium|planétarium|planetarium|cité|centre d'interprétation|parc d'attractions|amusement park|terra botanica)\b/i, ['insolite'], 120, 'Visite'],
+  ];
+  const EXCLUDE = /\b(gare|station|arrêt|école|lycée|collège|université|faculté|institut|campus|hôpital|clinique|hospital|school|university|stade|stadium|gymnase|patinoire|commune|ville de|village|arrondissement|canton|département|circonscription|municipality|district of|club|entreprise|société|company|association|journal|radio|chaîne|rivière|ruisseau|fleuve|river|ligne de|route|autoroute|road|motorway|railway|aéroport|airport|prison|caserne|immeuble|siège|banque|bureau de|élection|bataille|battle|événement|festival|équipe|diocèse|paroisse|parish|cinéma|lotissement|zone|parking|centrale|usine|échangeur|tramway|métro|tunnel|personnalité|footballeur|homme politique|écrivain)\b/i;
 
-  /* Lieux intéressants autour d'un point */
-  SV.discover = async function (center, radiusM) {
-    const a = '(around:' + Math.round(radiusM) + ',' + center.lat.toFixed(5) + ',' + center.lng.toFixed(5) + ')';
-    const q = '[out:json][timeout:40];(' +
-      'nwr' + a + '["tourism"~"^(attraction|museum|gallery|viewpoint|zoo|theme_park)$"]["name"];' +
-      'nwr' + a + '["historic"~"^(castle|fort|monument|memorial|ruins|church|city_gate|building|archaeological_site)$"]["name"]["wikidata"];' +
-      'nwr' + a + '["amenity"="place_of_worship"]["name"]["wikidata"];' +
-      'nwr' + a + '["leisure"~"^(park|garden)$"]["name"]["wikidata"];' +
-      'nwr' + a + '["amenity"~"^(public_bath|marketplace|theatre)$"]["name"];' +
-      'nwr' + a + '["amenity"~"^(bar|pub|nightclub|cafe|restaurant)$"]["name"]["wikidata"];' +
-      'nwr' + a + '["place"~"^(square|island)$"]["name"]["wikidata"];' +
-      'nwr' + a + '["man_made"="bridge"]["name"]["wikidata"];' +
-      ');out center tags 500;';
-    const data = await SV.overpass(q);
-    const seen = new Map();
-    for (const el of data.elements || []) {
-      const tags = el.tags || {}; const lat = el.lat ?? (el.center && el.center.lat), lng = el.lon ?? (el.center && el.center.lon);
-      if (!isFinite(lat) || !tags.name) continue;
-      const name = tags['name:fr'] || tags.name;
-      const k = (tags.wikidata || '') || name.toLowerCase();
-      if (seen.has(k)) continue;
-      const [key, value] = mainTag(tags);
-      const d = SV.describeTags(key, value, tags);
-      if (d.label === 'Hébergement') continue;
-      seen.set(k, { name, lat, lng, tags, wikidata: tags.wikidata || null, osm: { type: el.type, id: el.id }, cats: d.cats, dur: d.dur, meal: d.meal, label: d.label });
+  function classify(title, desc) {
+    const text = title + ' — ' + (desc || '');
+    if (EXCLUDE.test(desc || '') || /^(gare|stade|lycée|école|collège|université|hôpital) /i.test(title)) return null;
+    for (const [re, cats, dur, label] of RULES) if (re.test(title) || re.test(desc || '')) return { cats, dur, label };
+    if (/\b(rue|avenue|boulevard|street|quai)\b/i.test(text)) return { cats: ['quartiers'], dur: 20, label: 'Rue', weak: true };
+    return { cats: ['insolite'], dur: 40, label: 'À voir', weak: true };
+  }
+
+  async function wikiAround(lang, center, radiusM) {
+    const url = 'https://' + lang + '.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=geosearch' +
+      '&ggscoord=' + center.lat.toFixed(5) + '%7C' + center.lng.toFixed(5) + '&ggsradius=' + Math.min(10000, Math.round(radiusM)) + '&ggslimit=200' +
+      '&prop=coordinates%7Cdescription%7Cpageprops&ppprop=wikibase_item&colimit=max&coprimary=primary';
+    const data = await getJSON(url);
+    return Object.values((data.query && data.query.pages) || {}).map(p => ({
+      title: p.title, desc: p.description || '', lat: p.coordinates && p.coordinates[0] && p.coordinates[0].lat, lng: p.coordinates && p.coordinates[0] && p.coordinates[0].lon,
+      wikidata: p.pageprops && p.pageprops.wikibase_item, lang
+    })).filter(p => isFinite(p.lat) && isFinite(p.lng));
+  }
+
+  SV.discover = async function (center, radiusM, cityName) {
+    const results = await Promise.allSettled([wikiAround('fr', center, radiusM), wikiAround('en', center, radiusM)]);
+    const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+    if (!ok.length) throw results[0].reason || new Error('Wikipédia injoignable');
+    const byId = new Map();
+    for (const list of ok) for (const p of list) {
+      const k = p.wikidata || p.lang + ':' + p.title;
+      if (byId.has(k)) continue; // le français passe en premier
+      byId.set(k, p);
     }
-    const list = [...seen.values()];
-    await SV.addFame(list);
-    return list;
+    const city = (cityName || '').toLowerCase().trim();
+    const out = [];
+    for (const p of byId.values()) {
+      const name = p.title.replace(/\s*\([^)]*\)\s*$/, '');
+      if (city && name.toLowerCase() === city) continue;
+      const c = classify(p.title, p.desc);
+      if (!c) continue;
+      out.push({ name, lat: p.lat, lng: p.lng, tags: {}, wikidata: p.wikidata || null, osm: null, cats: c.cats, dur: c.dur, meal: c.cats.includes('food') && c.label !== 'Marché', label: c.label, weak: !!c.weak, desc: p.desc });
+    }
+    await SV.addFame(out);
+    return out.filter(x => !x.weak || x.fame >= 8);
   };
 
   /* Notoriété = nombre de langues Wikipédia (Wikidata sitelinks) */
@@ -170,12 +204,23 @@
 
   /* Restaurants autour d'un point */
   SV.foodAround = async function (pt, radiusM) {
-    const a = '(around:' + (radiusM || 400) + ',' + pt.lat.toFixed(5) + ',' + pt.lng.toFixed(5) + ')';
-    const data = await SV.overpass('[out:json][timeout:20];(nwr' + a + '["amenity"~"^(restaurant|cafe|fast_food)$"]["name"];);out center tags 60;');
-    return (data.elements || []).map(el => {
-      const t = el.tags || {}; const lat = el.lat ?? (el.center && el.center.lat), lng = el.lon ?? (el.center && el.center.lon);
-      return { name: t['name:fr'] || t.name, lat, lng, cuisine: (t.cuisine || '').split(';').slice(0, 2).join(', ').replace(/_/g, ' '), kind: t.amenity, oh: t.opening_hours || '', osm: { type: el.type, id: el.id } };
-    }).filter(r => isFinite(r.lat)).sort((a, b) => Planner.hav(pt, a) - Planner.hav(pt, b)).slice(0, 12);
+    const near = list => list.filter(r => isFinite(r.lat) && r.name).sort((a, b) => Planner.hav(pt, a) - Planner.hav(pt, b)).slice(0, 12);
+    try {
+      const a = '(around:' + (radiusM || 400) + ',' + pt.lat.toFixed(5) + ',' + pt.lng.toFixed(5) + ')';
+      const data = await SV.overpass('[out:json][timeout:15];(nwr' + a + '["amenity"~"^(restaurant|cafe|fast_food)$"]["name"];);out center tags 60;');
+      const list = near((data.elements || []).map(el => {
+        const t = el.tags || {}; const lat = el.lat ?? (el.center && el.center.lat), lng = el.lon ?? (el.center && el.center.lon);
+        return { name: t['name:fr'] || t.name, lat, lng, cuisine: (t.cuisine || '').split(';').slice(0, 2).join(', ').replace(/_/g, ' '), kind: t.amenity, oh: t.opening_hours || '', osm: { type: el.type, id: el.id } };
+      }));
+      if (list.length) return list;
+    } catch (e) { /* on passe à la recherche Photon */ }
+    const base = 'https://photon.komoot.io/api/?limit=15&lat=' + pt.lat.toFixed(5) + '&lon=' + pt.lng.toFixed(5);
+    const [r1, r2] = await Promise.allSettled([getJSON(base + '&q=restaurant&osm_tag=amenity:restaurant'), getJSON(base + '&q=café&osm_tag=amenity:cafe')]);
+    const feats = [].concat(r1.status === 'fulfilled' ? r1.value.features || [] : [], r2.status === 'fulfilled' ? r2.value.features || [] : []);
+    return near(feats.map(f => {
+      const p = f.properties || {}, c = f.geometry.coordinates;
+      return { name: p.name, lat: c[1], lng: c[0], cuisine: '', kind: p.osm_value, oh: '', osm: p.osm_type ? { type: p.osm_type, id: p.osm_id } : null };
+    }).filter(r => Planner.hav(pt, r) < 1.2));
   };
 
   /* --- Itinéraires OSRM (serveur FOSSGIS) --- */
