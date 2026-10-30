@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14213A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Flâneur">
+<meta name="description" content="Mes journées de visite, dans le bon ordre, sur ma propre carte.">
+<title>Flâneur</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <main id="mapwrap">
+    <div id="map" aria-label="Carte"></div>
+
+    <div id="map-top">
+      <div class="searchrow">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+          <input id="map-search" type="search" placeholder="Rechercher un lieu" autocomplete="off" enterkeyhint="search" aria-label="Rechercher un lieu">
+        </label>
+      </div>
+      <ul id="map-results" class="results" hidden></ul>
+      <div id="day-chips" class="daychips" role="tablist" aria-label="Jour"></div>
+    </div>
+
+    <div id="map-ctrl">
+      <button id="btn-3d" class="fab dark" aria-label="Vue 3D">3D</button>
+      <button id="btn-locate" class="fab" aria-label="Me localiser">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3 3 10.5l7.5 3 3 7.5z"/></svg>
+      </button>
+    </div>
+
+    <section id="nav-banner" hidden aria-live="polite">
+      <div class="nb-main">
+        <svg id="nb-icon" viewBox="0 0 24 24" aria-hidden="true"></svg>
+        <div class="nb-text">
+          <div id="nb-dist" class="nb-dist"></div>
+          <div id="nb-instr" class="nb-instr"></div>
+        </div>
+      </div>
+      <div id="nb-next" class="nb-next"></div>
+    </section>
+    <div id="nav-ctrl" hidden>
+      <button id="btn-nav3d" class="fab" aria-label="Basculer 2D / 3D">2D</button>
+      <button id="btn-voice" class="fab" aria-label="Couper la voix" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>
+      </button>
+      <button id="btn-recenter" class="fab" aria-label="Recentrer" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+      </button>
+    </div>
+    <section id="nav-bottom" hidden>
+      <div class="nbt-row">
+        <div><div id="nbt-eta" class="nbt-eta">--:--</div><div class="nbt-sub">arrivée</div></div>
+        <div><div id="nbt-left" class="nbt-left">–</div><div id="nbt-dist" class="nbt-sub">–</div></div>
+        <button id="btn-stopnav" class="btn danger">Arrêter</button>
+      </div>
+      <div class="nbt-target"><span id="nbt-num" class="pin sm">1</span><span id="nbt-name"></span></div>
+      <div id="nbt-extra" class="nbt-extra"></div>
+    </section>
+  </main>
+
+  <aside id="side">
+    <nav id="tabbar" aria-label="Navigation principale">
+      <button data-tab="map" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/></svg>Carte</button>
+      <button data-tab="prog"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Programme</button>
+      <button data-tab="plan"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Planifier</button>
+      <button data-tab="disc"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>Découvrir</button>
+    </nav>
+
+    <section id="sheet" class="sheet" aria-label="Prochaine étape"></section>
+
+    <section id="panel-prog" class="panel" hidden></section>
+
+    <section id="panel-plan" class="panel" hidden>
+      <header class="phead">
+        <div class="eyebrow">Mon voyage</div>
+        <h1>Planifier</h1>
+      </header>
+
+      <div class="card rows">
+        <label class="frow"><span>Ville</span><input id="f-city" type="text" autocomplete="off" placeholder="Ex. Budapest"></label>
+        <div class="frow col">
+          <span>Où je dors</span>
+          <div class="acwrap"><input id="f-hotel" type="search" autocomplete="off" placeholder="Nom ou adresse de l'hôtel"><ul id="hotel-results" class="results" hidden></ul></div>
+          <small id="hotel-state" class="hint"></small>
+        </div>
+        <label class="frow"><span>Arrivée le</span><input id="f-start" type="date"></label>
+        <div class="frow"><span>Nombre de jours</span>
+          <span class="stepper"><button id="days-m" aria-label="Un jour de moins">−</button><output id="days-o">2 jours</output><button id="days-p" aria-label="Un jour de plus">+</button></span>
+        </div>
+        <div class="frow"><span>Chaque jour</span>
+          <span class="times"><input id="f-dstart" type="time" aria-label="Départ"> <span aria-hidden="true">→</span> <input id="f-dend" type="time" aria-label="Retour"></span>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="eyebrow">Je me déplace</div>
+        <div id="f-transport" class="chips" role="group" aria-label="Déplacements">
+          <button data-v="walk">À pied</button><button data-v="mix">Pied + transports</button><button data-v="transit">Transports</button><button data-v="car">Voiture</button><button data-v="bike">Vélo</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="eyebrow">Repas</div>
+        <div class="meal"><label class="chk"><input id="l-on" type="checkbox"> Déjeuner</label><input id="l-from" type="time" aria-label="Déjeuner à partir de"><span>–</span><input id="l-to" type="time" aria-label="Déjeuner au plus tard"><select id="l-dur" aria-label="Durée du déjeuner"></select></div>
+        <div class="meal"><label class="chk"><input id="d-on" type="checkbox"> Dîner</label><input id="d-from" type="time" aria-label="Dîner à partir de"><span>–</span><input id="d-to" type="time" aria-label="Dîner au plus tard"><select id="d-dur" aria-label="Durée du dîner"></select></div>
+      </div>
+
+      <div class="group">
+        <div class="eyebrow">Rythme</div>
+        <div id="f-pace" class="seg" role="group" aria-label="Rythme"><button data-v="calme">Tranquille</button><button data-v="normal">Normal</button><button data-v="intense">Intense</button></div>
+      </div>
+
+      <div class="group">
+        <div class="rowsb"><div class="eyebrow" id="places-title">Mes lieux</div><span class="hint">★ = indispensable</span></div>
+        <div class="acwrap">
+          <label class="addfield"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><input id="f-add" type="search" autocomplete="off" placeholder="Ajouter un lieu, un resto…" aria-label="Ajouter un lieu"></label>
+          <ul id="add-results" class="results" hidden></ul>
+        </div>
+        <ul id="places" class="places"></ul>
+      </div>
+
+      <div class="group tools">
+        <button id="btn-export" class="btn ghost">Exporter mon voyage</button>
+        <label class="btn ghost">Importer<input id="f-import" type="file" accept="application/json,.json" hidden></label>
+        <button id="btn-clear" class="btn ghost">Tout effacer</button>
+      </div>
+      <div class="cta"><button id="btn-compute" class="btn accent big">Calculer mon itinéraire</button></div>
+    </section>
+
+    <section id="panel-disc" class="panel" hidden>
+      <header class="phead">
+        <div class="eyebrow">Mode découverte</div>
+        <h1 id="disc-title">Guide-moi</h1>
+        <p class="lead" id="disc-lead">Dis-moi ce que tu aimes, je compose tes journées.</p>
+      </header>
+      <div id="f-interests" class="chips" role="group" aria-label="Ce qui me plaît"></div>
+      <div class="group inline"><span class="lbl">Rythme</span><div id="d-pace" class="seg" role="group" aria-label="Rythme"><button data-v="calme">Tranquille</button><button data-v="normal">Normal</button><button data-v="intense">Intense</button></div></div>
+      <button id="btn-discover" class="btn dark big">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>Proposer mon programme</button>
+      <p id="disc-status" class="status"></p>
+      <div class="rowsb"><div class="eyebrow">Autres idées autour</div><span id="disc-count" class="hint"></span></div>
+      <ul id="disc-list" class="spots"></ul>
+      <p class="note">Lieux issus d'OpenStreetMap, classés par notoriété (nombre de langues Wikipédia) et selon tes envies.</p>
+    </section>
+  </aside>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="js/planner.js"></script>
+<script src="js/services.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
